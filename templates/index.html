@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#4CAF50">
   <meta charset="UTF-8">
   <title>English AI Assistant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="/static/style.css">
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js')
+    .then(() => console.log("Service Worker registered"));
+}
+</script>
 </head>
 <body>
 
