@@ -2,8 +2,9 @@ from flask import Flask, request, jsonify, render_template
 import openai, os
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 app = Flask(__name__)
-users_progress = {}
+users = {}
 
 @app.route("/")
 def index():
@@ -11,8 +12,60 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    user_msg = request.json.get("message","")
-    return jsonify({"reply":"Hello! This is AI English Assistant.","level":"Beginner","score":0})
+    user_id = request.json.get("user_id", "user1")
+    user_msg = request.json.get("message", "")
+
+    if user_id not in users:
+        users[user_id] = {
+            "level": "Beginner",
+            "score": 0,
+            "history": []
+        }
+
+    user = users[user_id]
+
+    system_prompt = f"""
+You are a friendly English teacher.
+User level: {user['level']}.
+
+Rules:
+- If user greets or says start → give a task.
+- Use one task at a time:
+  1) Translation
+  2) Fill in the blank
+  3) Multiple choice
+- Wait for user's answer.
+- Check it.
+- Explain simply.
+- Encourage.
+- Then give next task.
+"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages += user["history"][-6:]
+    messages.append({"role": "user", "content": user_msg})
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=messages
+    )
+
+    reply = response.choices[0].message.content
+
+    user["history"].append({"role": "user", "content": user_msg})
+    user["history"].append({"role": "assistant", "content": reply})
+
+    if "correct" in reply.lower():
+        user["score"] += 10
+        if user["score"] >= 50:
+            user["level"] = "Intermediate"
+
+    return jsonify({
+        "reply": reply,
+        "level": user["level"],
+        "score": user["score"]
+    })
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
