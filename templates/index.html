@@ -1,18 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#4CAF50">
   <meta charset="UTF-8">
   <title>English AI Assistant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#4CAF50">
   <link rel="stylesheet" href="/static/style.css">
-<script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/static/sw.js')
-    .then(() => console.log("Service Worker registered"));
-}
-</script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js')
+        .then(() => console.log("Service Worker registered"));
+    }
+  </script>
 </head>
 <body>
 
@@ -20,8 +22,12 @@ if ('serviceWorker' in navigator) {
 
 <div id="chat"></div>
 
-<input id="msg" placeholder="Type in English..." />
-<button onclick="send()">Send</button>
+<input id="msg" placeholder="Type or speak in English..." />
+
+<div style="margin-top:10px;">
+  <button onclick="send()">📨 Send</button>
+  <button onclick="startVoice()">🎤 Speak</button>
+</div>
 
 <p>
   Level: <span id="level">Beginner</span> |
