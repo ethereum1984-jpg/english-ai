@@ -1,12 +1,17 @@
-async function send() {
-  const input = document.getElementById("msg");
-  const msg = input.value;
-  if (!msg) return;
+const chat = document.getElementById("chat");
 
+function add(role, text) {
+  chat.innerHTML += `<p><b>${role}:</b> ${text}</p>`;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function send(text = null) {
+  const input = document.getElementById("msg");
+  const msg = text || input.value;
+  if (!msg) return;
   input.value = "";
 
-  document.getElementById("chat").innerHTML +=
-    `<p><b>You:</b> ${msg}</p>`;
+  add("You", msg);
 
   const res = await fetch("/chat", {
     method: "POST",
@@ -18,10 +23,29 @@ async function send() {
   });
 
   const data = await res.json();
-
-  document.getElementById("chat").innerHTML +=
-    `<p><b>AI:</b> ${data.reply}</p>`;
+  add("AI", data.reply);
 
   document.getElementById("level").innerText = data.level;
   document.getElementById("score").innerText = data.score;
+
+  speak(data.reply);
+}
+
+function speak(text) {
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "en-US";
+  speechSynthesis.speak(utter);
+}
+
+// 🎤 Speech to Text
+function startVoice() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recog = new SpeechRecognition();
+  recog.lang = "en-US";
+  recog.start();
+
+  recog.onresult = e => {
+    const text = e.results[0][0].transcript;
+    send(text);
+  };
 }
