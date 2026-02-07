@@ -1,11 +1,50 @@
+import sqlite3
 from flask import Flask, request, jsonify, render_template
 import openai, os
 
-# OpenAI ключ из переменных окружения
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
-users = {}
+
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
+def init_db():
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            level TEXT,
+            score INTEGER,
+            history TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_user(user_id):
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('SELECT level, score, history FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        import json
+        return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
+    return {"level": "Beginner", "score": 0, "history": []}
+
+def save_user(user_id, user_data):
+    import json
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO users (user_id, level, score, history)
+        VALUES (?, ?, ?, ?)
+    ''', (user_id, user_data['level'], user_data['score'], json.dumps(user_data['history'])))
+    conn.commit()
+    conn.close()
+
+init_db()
+# ------------------------------
 
 @app.route("/")
 def index():
@@ -16,31 +55,12 @@ def chat():
     user_id = request.json.get("user_id", "user1")
     user_msg = request.json.get("message", "")
 
-    if user_id not in users:
-        users[user_id] = {
-            "level": "Beginner",
-            "score": 0,
-            "history": []
-        }
-
-    user = users[user_id]
+    user = get_user(user_id)
 
     system_prompt = f"""
-You are a friendly English teacher.
-User level: {user['level']}.
-
-Rules:
-- If user greets or says start → give a task.
-- Use one task at a time:
-  1) Translation
-  2) Fill in the blank
-  3) Multiple choice
-- Wait for user's answer.
-- Check it.
-- Explain simply.
-- Encourage.
-- Then give next task.
-"""
+    You are a friendly English teacher. User level: {user['level']}.
+    Rules: Give tasks (Translation, Fill in the blank, Multiple choice), check answers, explain simply.
+    """
 
     messages = [{"role": "system", "content": system_prompt}]
     messages += user["history"][-6:]
@@ -52,7 +72,6 @@ Rules:
     )
 
     reply = response.choices[0].message.content
-
     user["history"].append({"role": "user", "content": user_msg})
     user["history"].append({"role": "assistant", "content": reply})
 
@@ -61,14 +80,14 @@ Rules:
         if user["score"] >= 50:
             user["level"] = "Intermediate"
 
+    save_user(user_id, user)
+
     return jsonify({
         "reply": reply,
         "level": user["level"],
         "score": user["score"]
     })
 
-# 🔹 Railway Production-ready
 if __name__ == "__main__":
-    # Берём порт от Railway
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
