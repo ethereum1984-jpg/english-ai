@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 import openai, os
 
+# OpenAI ключ из переменных окружения
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
@@ -66,6 +67,8 @@ Rules:
         "score": user["score"]
     })
 
+# 🔹 Railway Production-ready
 if __name__ == "__main__":
+    # Берём порт от Railway
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
