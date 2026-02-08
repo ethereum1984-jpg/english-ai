@@ -4,22 +4,16 @@ import json
 from flask import Flask, request, jsonify, render_template
 import openai
 
-# ===== OPENAI KEY (ТОЛЬКО ИЗ ENV) =====
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-if not openai.api_key:
-    raise RuntimeError("OPENAI_API_KEY is not set in environment variables")
+app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# ===== FLASK APP =====
-app = Flask(__name__)
-
-# ===== DATABASE =====
 DB_FILE = "db.sqlite"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("""
+    cursor = conn.cursor()
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             level TEXT,
@@ -32,9 +26,12 @@ def init_db():
 
 def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT level, score, history FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT level, score, history FROM users WHERE user_id = ?",
+        (user_id,)
+    )
+    row = cursor.fetchone()
     conn.close()
 
     if row:
@@ -44,51 +41,37 @@ def get_user(user_id):
             "history": json.loads(row[2])
         }
 
-    return {
-        "level": "Beginner",
-        "score": 0,
-        "history": []
-    }
+    return {"level": "Beginner", "score": 0, "history": []}
 
-def save_user(user_id, user):
+def save_user(user_id, user_data):
     conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
+    cursor = conn.cursor()
+    cursor.execute(
         "INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
-        (user_id, user["level"], user["score"], json.dumps(user["history"]))
+        (user_id, user_data["level"], user_data["score"], json.dumps(user_data["history"]))
     )
     conn.commit()
     conn.close()
 
 init_db()
 
-# ===== ROUTES =====
-
 @app.route("/")
-def home():
-    return "English AI Assistant is running ✅"
+def index():
+    # Отдаёт HTML интерфейс
+    return render_template("index.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(force=True)
+    data = request.json
     user_id = data.get("user_id", "user1")
-    message = data.get("message", "").strip()
-
-    if not message:
-        return jsonify({"error": "Empty message"}), 400
+    message = data.get("message", "")
 
     user = get_user(user_id)
 
     system_prompt = f"""
 You are a friendly English teacher.
 User level: {user['level']}.
-
-Rules:
-- Give ONE task at a time
-- Types: translation, fill the blank, simple question
-- Wait for answer
-- Correct and explain simply
-- Encourage the user
+Give tasks, check answers, be encouraging.
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -100,10 +83,9 @@ Rules:
             model="gpt-3.5-turbo",
             messages=messages
         )
+        reply = response.choices[0].message.content
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    reply = response.choices[0].message.content
+        reply = "Sorry, I can't answer right now."
 
     user["history"].append({"role": "user", "content": message})
     user["history"].append({"role": "assistant", "content": reply})
@@ -115,13 +97,8 @@ Rules:
 
     save_user(user_id, user)
 
-    return jsonify({
-        "reply": reply,
-        "level": user["level"],
-        "score": user["score"]
-    })
+    return jsonify({"reply": reply, "level": user["level"], "score": user["score"]})
 
-# ===== LOCAL RUN (Railway игнорирует) =====
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
