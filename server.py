@@ -5,15 +5,16 @@ from flask import Flask, request, jsonify, render_template
 import google.generativeai as genai
 
 # ——— Настройка Gemini ———
-# Код берет ключ из переменной GEMINI_API_KEY в Railway
+# Код ищет переменную GEMINI_API_KEY в настройках Railway
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_KEY:
-    print("CRITICAL ERROR: GEMINI_API_KEY is not set in environment variables!")
+    print("CRITICAL: GEMINI_API_KEY is not set in Railway environment variables!")
 else:
     genai.configure(api_key=GEMINI_KEY)
 
-# Используем модель Gemini 1.5 Flash
+# Используем модель gemini-1.5-flash. 
+# Если 404 повторится, можно попробовать сменить на 'gemini-1.0-pro'
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -45,7 +46,7 @@ def get_user(user_id):
         if row:
             return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
     except Exception as e:
-        print(f"DB Error: {e}")
+        print(f"DB Read Error: {e}")
     return {"level": "Beginner", "score": 0, "history": []}
 
 def save_user(user_id, user):
@@ -74,44 +75,44 @@ def chat():
     message = data.get("message", "")
 
     if not GEMINI_KEY:
-        return jsonify({"reply": "Error: GEMINI_API_KEY is missing in Railway settings.", "level": "---", "score": 0})
+        return jsonify({"reply": "System Error: API Key is missing. Add GEMINI_API_KEY to Railway Variables."})
 
     user = get_user(user_id)
 
-    # Формируем промпт
-    prompt_parts = [
-        f"You are a friendly English teacher. User level: {user['level']}.",
-        "Rules: Be concise, correct mistakes, and give a small task.",
-        "Conversation History:"
-    ]
-    
-    for h in user["history"][-6:]:
-        role = "Student" if h["role"] == "user" else "Teacher"
-        prompt_parts.append(f"{role}: {h['content']}")
-    
-    prompt_parts.append(f"Student: {message}")
-    prompt_parts.append("Teacher:")
+    # Собираем промпт для учителя
+    prompt = (
+        f"You are a friendly English teacher. Current student level: {user['level']}.\n"
+        f"History: {user['history'][-4:]}\n"
+        f"Student says: {message}\n"
+        f"Teacher: Respond briefly, correct any grammar mistakes, and give a tiny task."
+    )
 
     try:
-        # Пытаемся получить ответ
-        response = model.generate_content("\n".join(prompt_parts))
-        reply = response.text
+        # Прямой вызов генерации
+        response = model.generate_content(prompt)
+        
+        # В новых версиях API ответ лежит в response.text
+        if response and response.text:
+            reply = response.text
+        else:
+            reply = "I received an empty response from the AI. Please try again."
+            
     except Exception as e:
-        # Если ошибка — выводим её текст, чтобы понять причину
-        error_msg = str(e)
-        print(f"Gemini Error: {error_msg}")
-        return jsonify({
-            "reply": f"Gemini Error: {error_msg}. (Check if your API key supports your server's region)",
-            "level": user["level"],
-            "score": user["score"]
-        })
+        error_str = str(e)
+        print(f"Gemini Error: {error_str}")
+        # Если это снова 404, предложим сменить модель в логах
+        if "404" in error_str:
+            reply = "Error 404: The model version is not found. Try updating your requirements.txt to google-generativeai>=0.8.0"
+        else:
+            reply = f"AI Error: {error_str}"
 
-    # Обновляем историю и прогресс
+    # Обновляем историю
     user["history"].append({"role": "user", "content": message})
     user["history"].append({"role": "assistant", "content": reply})
 
-    # Простая логика баллов
-    if any(word in reply.lower() for word in ["correct", "good", "well done"]):
+    # Начисляем очки за правильные ответы (простая проверка по ключевым словам)
+    check_words = ["correct", "well done", "good job", "perfect", "right"]
+    if any(word in reply.lower() for word in check_words):
         user["score"] += 10
         if user["score"] >= 50 and user["level"] == "Beginner":
             user["level"] = "Intermediate"
@@ -125,6 +126,5 @@ def chat():
     })
 
 if __name__ == "__main__":
-    # Railway передает порт через переменную окружения
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
