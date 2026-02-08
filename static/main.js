@@ -1,49 +1,70 @@
 const chat = document.getElementById("chat");
+const msgInput = document.getElementById("msg");
 
-function addMessage(role, text) {
-    chat.innerHTML += `<p><b>${role}:</b> ${text}</p>`;
+// ====== ОТПРАВКА СООБЩЕНИЯ ======
+function send() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+
+  chat.innerHTML += `<div><b>You:</b> ${text}</div>`;
+  chat.scrollTop = chat.scrollHeight;
+
+  fetch("/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      user_id: "user1",
+      message: text
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    chat.innerHTML += `<div><b>AI:</b> ${data.reply}</div>`;
     chat.scrollTop = chat.scrollHeight;
-}
-
-async function send(text = null) {
-    const input = document.getElementById("msg");
-    const msg = text || input.value;
-    if (!msg) return;
-    input.value = "";
-
-    addMessage("You", msg);
-
-    const res = await fetch("/chat", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ message: msg, user_id: "user1" })
-    });
-
-    const data = await res.json();
-    addMessage("AI", data.reply);
 
     document.getElementById("level").innerText = data.level;
     document.getElementById("score").innerText = data.score;
 
-    speak(data.reply);
+    speak(data.reply); // 🔊 голос ИИ
+  })
+  .catch(() => {
+    chat.innerHTML += `<div><b>AI:</b> Error connecting to server</div>`;
+  });
+
+  msgInput.value = "";
 }
 
-function speak(text) {
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "en-US";
-    window.speechSynthesis.speak(utter);
-}
-
+// ====== МИКРОФОН (Speech → Text) ======
 function startVoice() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert("Ваш браузер не поддерживает распознавание речи.");
-    
-    const recog = new SpeechRecognition();
-    recog.lang = "en-US";
-    recog.start();
+  if (!('webkitSpeechRecognition' in window)) {
+    alert("Speech recognition not supported");
+    return;
+  }
 
-    recog.onresult = (e) => {
-        const text = e.results[0][0].transcript;
-        send(text);
-    };
+  const recognition = new webkitSpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+
+  recognition.onresult = function(event) {
+    const text = event.results[0][0].transcript;
+    msgInput.value = text;
+    send();
+  };
+
+  recognition.onerror = function() {
+    alert("Voice recognition error");
+  };
+
+  recognition.start();
+}
+
+// ====== ГОЛОС ИИ (Text → Speech) ======
+function speak(text) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
 }
