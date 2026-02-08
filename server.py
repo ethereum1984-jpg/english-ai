@@ -4,14 +4,20 @@ import json
 from flask import Flask, request, jsonify, render_template
 import openai
 
+# ——— OpenAI ключ из окружения (надо указать в Railway) ———
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+if not openai.api_key:
+    raise RuntimeError("OPENAI_API_KEY is not set")
+
+# ——— Flask ———
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-DB_FILE = "db.sqlite"
+# ——— SQLite ———
+DB = "db.sqlite"
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -25,7 +31,7 @@ def init_db():
     conn.close()
 
 def get_user(user_id):
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB)
     cursor = conn.cursor()
     cursor.execute(
         "SELECT level, score, history FROM users WHERE user_id = ?",
@@ -35,34 +41,30 @@ def get_user(user_id):
     conn.close()
 
     if row:
-        return {
-            "level": row[0],
-            "score": row[1],
-            "history": json.loads(row[2])
-        }
-
+        return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
     return {"level": "Beginner", "score": 0, "history": []}
 
-def save_user(user_id, user_data):
-    conn = sqlite3.connect(DB_FILE)
+def save_user(user_id, user):
+    conn = sqlite3.connect(DB)
     cursor = conn.cursor()
     cursor.execute(
         "INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
-        (user_id, user_data["level"], user_data["score"], json.dumps(user_data["history"]))
+        (user_id, user["level"], user["score"], json.dumps(user["history"]))
     )
     conn.commit()
     conn.close()
 
 init_db()
 
+# ——— Main UI ———
 @app.route("/")
 def index():
-    # Отдаёт HTML интерфейс
     return render_template("index.html")
 
+# ——— Chat API ———
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
+    data = request.json or {}
     user_id = data.get("user_id", "user1")
     message = data.get("message", "")
 
@@ -71,7 +73,10 @@ def chat():
     system_prompt = f"""
 You are a friendly English teacher.
 User level: {user['level']}.
-Give tasks, check answers, be encouraging.
+
+Give a short English language exercise,
+wait for the answer, correct it, explain simply,
+and encourage the user.
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -97,8 +102,13 @@ Give tasks, check answers, be encouraging.
 
     save_user(user_id, user)
 
-    return jsonify({"reply": reply, "level": user["level"], "score": user["score"]})
+    return jsonify({
+        "reply": reply,
+        "level": user["level"],
+        "score": user["score"]
+    })
 
+# ——— Start server ———
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
