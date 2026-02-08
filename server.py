@@ -5,12 +5,15 @@ from flask import Flask, request, jsonify, render_template
 import google.generativeai as genai
 
 # ——— Настройка Gemini ———
+# Код берет ключ из переменной GEMINI_API_KEY в Railway
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_KEY:
-    print("WARNING: GEMINI_API_KEY is not set!")
-genai.configure(api_key=GEMINI_KEY)
 
-# Используем модель Gemini 1.5 Flash (она быстрая и легкая)
+if not GEMINI_KEY:
+    print("CRITICAL ERROR: GEMINI_API_KEY is not set in environment variables!")
+else:
+    genai.configure(api_key=GEMINI_KEY)
+
+# Используем модель Gemini 1.5 Flash
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -33,24 +36,30 @@ def init_db():
     conn.close()
 
 def get_user(user_id):
-    conn = sqlite3.connect(DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT level, score, history FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
+    try:
+        conn = sqlite3.connect(DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT level, score, history FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
+    except Exception as e:
+        print(f"DB Error: {e}")
     return {"level": "Beginner", "score": 0, "history": []}
 
 def save_user(user_id, user):
-    conn = sqlite3.connect(DB)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
-        (user_id, user["level"], user["score"], json.dumps(user["history"]))
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
+            (user_id, user["level"], user["score"], json.dumps(user["history"]))
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DB Save Error: {e}")
 
 init_db()
 
@@ -64,37 +73,45 @@ def chat():
     user_id = data.get("user_id", "user1")
     message = data.get("message", "")
 
+    if not GEMINI_KEY:
+        return jsonify({"reply": "Error: GEMINI_API_KEY is missing in Railway settings.", "level": "---", "score": 0})
+
     user = get_user(user_id)
 
-    # Формируем контекст для Gemini
+    # Формируем промпт
     prompt_parts = [
         f"You are a friendly English teacher. User level: {user['level']}.",
-        "History of conversation:",
+        "Rules: Be concise, correct mistakes, and give a small task.",
+        "Conversation History:"
     ]
     
-    # Добавляем историю (последние 6 сообщений)
     for h in user["history"][-6:]:
         role = "Student" if h["role"] == "user" else "Teacher"
         prompt_parts.append(f"{role}: {h['content']}")
     
     prompt_parts.append(f"Student: {message}")
-    prompt_parts.append("Teacher: Give a short exercise, correct mistakes, and explain simply.")
+    prompt_parts.append("Teacher:")
 
     try:
-        # Генерация ответа через Gemini
+        # Пытаемся получить ответ
         response = model.generate_content("\n".join(prompt_parts))
         reply = response.text
     except Exception as e:
-        print(f"Error: {e}")
-        reply = "I'm having trouble with my Google brain. Check the API Key!"
+        # Если ошибка — выводим её текст, чтобы понять причину
+        error_msg = str(e)
+        print(f"Gemini Error: {error_msg}")
+        return jsonify({
+            "reply": f"Gemini Error: {error_msg}. (Check if your API key supports your server's region)",
+            "level": user["level"],
+            "score": user["score"]
+        })
 
-    # Сохраняем историю
+    # Обновляем историю и прогресс
     user["history"].append({"role": "user", "content": message})
     user["history"].append({"role": "assistant", "content": reply})
 
-    # Простая геймификация
-    lower_reply = reply.lower()
-    if any(word in lower_reply for word in ["correct", "well done", "good job", "perfect"]):
+    # Простая логика баллов
+    if any(word in reply.lower() for word in ["correct", "good", "well done"]):
         user["score"] += 10
         if user["score"] >= 50 and user["level"] == "Beginner":
             user["level"] = "Intermediate"
@@ -108,5 +125,6 @@ def chat():
     })
 
 if __name__ == "__main__":
+    # Railway передает порт через переменную окружения
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
