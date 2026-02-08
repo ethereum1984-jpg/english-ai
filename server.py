@@ -2,15 +2,20 @@ import os
 import sqlite3
 import json
 from flask import Flask, request, jsonify, render_template
-from openai import OpenAI
+import google.generativeai as genai
 
-# ——— Инициализация клиента OpenAI ———
-# Ключ автоматически подтянется из переменной окружения OPENAI_API_KEY
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ——— Настройка Gemini ———
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_KEY:
+    print("WARNING: GEMINI_API_KEY is not set!")
+genai.configure(api_key=GEMINI_KEY)
+
+# Используем модель Gemini 1.5 Flash (она быстрая и легкая)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# ——— SQLite ———
+# ——— База данных (SQLite) ———
 DB = "db.sqlite"
 
 def init_db():
@@ -61,31 +66,37 @@ def chat():
 
     user = get_user(user_id)
 
-    system_prompt = f"You are a friendly English teacher. User level: {user['level']}. Give a short exercise, wait for the answer, correct it and explain simply."
-
-    messages = [{"role": "system", "content": system_prompt}]
-    # Берем последние 6 сообщений для контекста
-    messages += user["history"][-6:]
-    messages.append({"role": "user", "content": message})
+    # Формируем контекст для Gemini
+    prompt_parts = [
+        f"You are a friendly English teacher. User level: {user['level']}.",
+        "History of conversation:",
+    ]
+    
+    # Добавляем историю (последние 6 сообщений)
+    for h in user["history"][-6:]:
+        role = "Student" if h["role"] == "user" else "Teacher"
+        prompt_parts.append(f"{role}: {h['content']}")
+    
+    prompt_parts.append(f"Student: {message}")
+    prompt_parts.append("Teacher: Give a short exercise, correct mistakes, and explain simply.")
 
     try:
-        # НОВЫЙ СИНТАКСИС (OpenAI v1.0+)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages
-        )
-        reply = response.choices[0].message.content
+        # Генерация ответа через Gemini
+        response = model.generate_content("\n".join(prompt_parts))
+        reply = response.text
     except Exception as e:
-        print(f"Error: {e}") # Это отобразится в логах Railway
-        reply = "I'm having trouble connecting to my brain. Check if the API Key is set!"
+        print(f"Error: {e}")
+        reply = "I'm having trouble with my Google brain. Check the API Key!"
 
+    # Сохраняем историю
     user["history"].append({"role": "user", "content": message})
     user["history"].append({"role": "assistant", "content": reply})
 
-    # Простая логика начисления очков
-    if "correct" in reply.lower() or "well done" in reply.lower():
+    # Простая геймификация
+    lower_reply = reply.lower()
+    if any(word in lower_reply for word in ["correct", "well done", "good job", "perfect"]):
         user["score"] += 10
-        if user["score"] >= 50:
+        if user["score"] >= 50 and user["level"] == "Beginner":
             user["level"] = "Intermediate"
 
     save_user(user_id, user)
