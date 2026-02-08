@@ -5,21 +5,19 @@ from flask import Flask, request, jsonify, render_template
 import google.generativeai as genai
 
 # ——— Настройка Gemini ———
-# Код ищет переменную GEMINI_API_KEY в настройках Railway
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_KEY:
-    print("CRITICAL: GEMINI_API_KEY is not set in Railway environment variables!")
+    print("CRITICAL: GEMINI_API_KEY IS MISSING")
 else:
     genai.configure(api_key=GEMINI_KEY)
 
-# Используем модель gemini-1.5-flash. 
-# Если 404 повторится, можно попробовать сменить на 'gemini-1.0-pro'
-model = genai.GenerativeModel('gemini-1.5-flash')
+# МЕНЯЕМ МОДЕЛЬ НА ПРОФЕССИОНАЛЬНУЮ СТАБИЛЬНУЮ ВЕРСИЮ
+model = genai.GenerativeModel('gemini-1.0-pro')
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# ——— База данных (SQLite) ———
+# ——— База данных ———
 DB = "db.sqlite"
 
 def init_db():
@@ -45,22 +43,18 @@ def get_user(user_id):
         conn.close()
         if row:
             return {"level": row[0], "score": row[1], "history": json.loads(row[2])}
-    except Exception as e:
-        print(f"DB Read Error: {e}")
+    except: pass
     return {"level": "Beginner", "score": 0, "history": []}
 
 def save_user(user_id, user):
     try:
         conn = sqlite3.connect(DB)
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
-            (user_id, user["level"], user["score"], json.dumps(user["history"]))
-        )
+        cursor.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)",
+                       (user_id, user["level"], user["score"], json.dumps(user["history"])))
         conn.commit()
         conn.close()
-    except Exception as e:
-        print(f"DB Save Error: {e}")
+    except: pass
 
 init_db()
 
@@ -75,55 +69,35 @@ def chat():
     message = data.get("message", "")
 
     if not GEMINI_KEY:
-        return jsonify({"reply": "System Error: API Key is missing. Add GEMINI_API_KEY to Railway Variables."})
+        return jsonify({"reply": "API Key error. Check Railway Variables."})
 
     user = get_user(user_id)
 
-    # Собираем промпт для учителя
+    # Упрощенный промпт для стабильности
     prompt = (
-        f"You are a friendly English teacher. Current student level: {user['level']}.\n"
-        f"History: {user['history'][-4:]}\n"
-        f"Student says: {message}\n"
-        f"Teacher: Respond briefly, correct any grammar mistakes, and give a tiny task."
+        f"You are a helpful English teacher. Student level: {user['level']}.\n"
+        f"Correct mistakes and respond briefly to: {message}"
     )
 
     try:
-        # Прямой вызов генерации
+        # Используем старый проверенный метод генерации
         response = model.generate_content(prompt)
-        
-        # В новых версиях API ответ лежит в response.text
-        if response and response.text:
-            reply = response.text
-        else:
-            reply = "I received an empty response from the AI. Please try again."
-            
+        reply = response.text
     except Exception as e:
-        error_str = str(e)
-        print(f"Gemini Error: {error_str}")
-        # Если это снова 404, предложим сменить модель в логах
-        if "404" in error_str:
-            reply = "Error 404: The model version is not found. Try updating your requirements.txt to google-generativeai>=0.8.0"
-        else:
-            reply = f"AI Error: {error_str}"
+        print(f"Error detail: {e}")
+        # Если даже Pro выдает 404, значит проблема в регионе сервера Railway
+        reply = f"Error: {str(e)}. Try to change Railway server region to US East."
 
-    # Обновляем историю
     user["history"].append({"role": "user", "content": message})
     user["history"].append({"role": "assistant", "content": reply})
 
-    # Начисляем очки за правильные ответы (простая проверка по ключевым словам)
-    check_words = ["correct", "well done", "good job", "perfect", "right"]
-    if any(word in reply.lower() for word in check_words):
+    if "correct" in reply.lower() or "good" in reply.lower():
         user["score"] += 10
-        if user["score"] >= 50 and user["level"] == "Beginner":
-            user["level"] = "Intermediate"
+        if user["score"] >= 50: user["level"] = "Intermediate"
 
     save_user(user_id, user)
 
-    return jsonify({
-        "reply": reply,
-        "level": user["level"],
-        "score": user["score"]
-    })
+    return jsonify({"reply": reply, "level": user["level"], "score": user["score"]})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
